@@ -1,0 +1,8 @@
+# Logs (pesados y con datos de operación)
+*.log
+*.out
+*.log.gz
+
+# Python
+__pycache__/
+*.pyc
