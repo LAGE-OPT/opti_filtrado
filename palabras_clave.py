@@ -6,23 +6,46 @@ import os
 import re
 import sys
 
-try:
-    from ConfigParser import RawConfigParser, Error as ConfigError
-except ImportError:
-    from configparser import RawConfigParser, Error as ConfigError
-
 from leer_logs import ruta_config_usuario, lineas_de, a_texto_nativo
+
+CLAVES_FILTROS = ('conservar', 'excluir')
+
+
+def leer_config(texto):
+    """Lee el texto del .config que genera leer_logs.py y devuelve {seccion: {clave: valor}}.
+    No se usa configparser: en [filtros] cada frase va en su propia linea, con o sin sangria,
+    y una frase puede traer '=' o ':' (por ejemplo "SCRIPT_RUN_TYPE = prod") sin confundirse con una clave.
+    Recibe el texto para poder probarlo sin archivos."""
+    secciones, seccion, clave = {}, None, None
+    for linea in texto.splitlines():
+        limpia = linea.strip()
+        if not limpia or limpia.startswith(('#', ';')):
+            continue
+        if limpia.startswith('[') and limpia.endswith(']'):
+            seccion = limpia[1:-1].strip()
+            if seccion.lower() == 'filtros':
+                seccion = 'filtros'
+            secciones.setdefault(seccion, {})
+            clave = None
+            continue
+        if seccion is None:
+            continue
+        nombre, separador, valor = limpia.partition('=')
+        if seccion == 'filtros':
+            if separador and nombre.strip().lower() in CLAVES_FILTROS:
+                clave = nombre.strip().lower()
+                secciones[seccion][clave] = valor.strip()
+            elif clave: # Cualquier otra linea es una frase mas de la ultima clave
+                secciones[seccion][clave] += '\n' + limpia
+        elif separador:
+            secciones[seccion][nombre.strip()] = valor.strip()
+    return secciones
 
 
 def cargar_config(ruta):
     """Lee el archivo .config que ya genera leer_logs.py."""
-    config = RawConfigParser()
     with io.open(ruta, 'r', encoding='utf-8') as archivo:
-        if sys.version_info[0] == 2:
-            config.readfp(archivo)
-        else:
-            config.read_file(archivo)
-    return config
+        return leer_config(archivo.read())
 
 
 def preparar_patrones(texto):
@@ -70,24 +93,24 @@ def ejecutar():
 
     try:
         config = cargar_config(ruta_config)
-        if not config.has_section('filtros'):
+        if 'filtros' not in config:
             print('Falta la seccion [filtros] en el .config.')
             return 1
 
-        conservar = preparar_patrones(config.get('filtros', 'conservar'))
-        excluir = preparar_patrones(config.get('filtros', 'excluir'))
-    except (IOError, OSError, ValueError, KeyError, ConfigError, UnicodeError) as error:
+        conservar = preparar_patrones(config['filtros'].get('conservar', ''))
+        excluir = preparar_patrones(config['filtros'].get('excluir', ''))
+    except (IOError, OSError, ValueError, UnicodeError) as error:
         print('Configuracion invalida: %s' % error, file=sys.stderr)
         return 1
 
     carpeta = os.path.dirname(ruta_config)
     procesados, errores = set(), 0
     encontrados = 0
-    for seccion in config.sections():
-        if not config.has_option(seccion, 'log_exportado'):
+    for seccion in sorted(config):
+        if 'log_exportado' not in config[seccion]:
             continue
         encontrados += 1
-        entrada = a_texto_nativo(config.get(seccion, 'log_exportado').strip())
+        entrada = a_texto_nativo(config[seccion]['log_exportado'])
         if not os.path.isabs(entrada):
             entrada = os.path.join(carpeta, entrada)
         entrada = os.path.realpath(entrada)

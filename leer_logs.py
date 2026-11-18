@@ -293,7 +293,7 @@ def copiar_segmentos(abrir, se_puede_saltar, segmentos, ruta_salida):
 '''RECUPERA LA SECCION EDITABLE [filtros] ANTES DE REESCRIBIR EL RESUMEN DE EJECUCION.'''
 def conservar_seccion_filtros(ruta_config):
     predeterminada = (u'\n[filtros]\n'
-                     u'# Una frase por linea. * significa cualquier texto intermedio.\n'
+                     u'# Una frase por linea, debajo de conservar = o excluir =. * significa cualquier texto intermedio.\n'
                      u'conservar =\n'
                      u'excluir =\n')
 
