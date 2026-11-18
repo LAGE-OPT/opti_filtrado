@@ -290,6 +290,32 @@ def copiar_segmentos(abrir, se_puede_saltar, segmentos, ruta_salida):
     return escritas, None
 
 
+'''RECUPERA LA SECCION EDITABLE [filtros] ANTES DE REESCRIBIR EL RESUMEN DE EJECUCION.'''
+def conservar_seccion_filtros(ruta_config):
+    predeterminada = (u'\n[filtros]\n'
+                     u'# Una frase por linea. * significa cualquier texto intermedio.\n'
+                     u'conservar =\n'
+                     u'excluir =\n')
+
+    if not os.path.isfile(ruta_config):
+        return predeterminada
+
+    with io.open(ruta_config, 'r', encoding='utf-8') as archivo:
+        lineas = archivo.readlines()
+
+    dentro, bloque = False, []
+    for linea in lineas:
+        titulo = linea.strip()
+        if titulo.startswith('[') and titulo.endswith(']'):
+            if dentro:
+                break
+            dentro = titulo.lower() == '[filtros]'
+        if dentro:
+            bloque.append(linea)
+    return u'\n' + u''.join(bloque).strip(u'\n') + u'\n' if bloque else predeterminada
+
+
+
 '''GUARDA LA FECHA SELECCIONADA Y EL RESULTADO DE CADA LOG EN EL ARCHIVO .config
 ruta_logs SE ESCRIBE TAL COMO LA DEJO EL USUARIO (SE CONSERVA ENTRE EJECUCIONES)'''
 def guardar_config(carpeta, usuario, fecha_seleccionada, resultados, ruta_logs_texto):
@@ -305,9 +331,12 @@ def guardar_config(carpeta, usuario, fecha_seleccionada, resultados, ruta_logs_t
         texto += '\n[%s]\nfechas=%s\nlog_exportado=%s\nlineas=%d\najuste_horas_utc=%+g\ncorte=%s\n' % (
             nombre, ','.join(f.strftime('%Y-%m-%d') for f in fechas), salida, escritas, ajuste,
             'corridas_completas' if por_corrida else 'por_dia')
+    filtros = conservar_seccion_filtros(ruta_config)
     with io.open(ruta_config, 'w', encoding='utf-8') as config:
-        config.write(texto.decode(CODIFICACION_RUTAS) if isinstance(texto, bytes) else texto)
+        resumen = texto.decode(CODIFICACION_RUTAS) if isinstance(texto, bytes) else texto
+        config.write(resumen + filtros)
     return ruta_config
+
 
 
 '''LEE LOS ARGUMENTOS: LOS LOGS Y LA FECHA OPCIONAL (--fecha AAAA-MM-DD)'''
