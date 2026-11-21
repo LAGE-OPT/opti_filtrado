@@ -1,15 +1,28 @@
 # -*- coding: utf-8 -*-
-# Filtra un log por fecha y por palabras clave. Python 2.7 y 3, sin librerias externas.
-# Uso: python filtrar_log.py process_bids.log [-f 2026-10-19] [-c "frase"] [-e "frase"]   (o --fecha, --conservar, --excluir)
-#      python filtrar_log.py process_bids.log -li "inicio" -lf "fin"   (bloques entre dos lineas)
+'''
+OPTI FILTRADO
+-------------
+Este programa es una herramienta para el equipo de soporte de Aeroméxico.
+Utiliza como input archivos .log y .out junto con algunos parámetros que facilitan la búsqueda de información.
+
+-f y --fecha: En formato AAAA-MM-DD para una fecha en específico. En caso de no utilizar este parámetro, un menú se desplegará en la terminal para seleccionar la o las fechas a filtrar.
+-li (línea inicial), -lf (línea final): Una string entre comillas para guardar todas las líneas entre estas dos líneas, se guardan en bloques en caso de que se repita en múltiples ocasiones a lo largo del log.
+-bc: Un string entre comillas, se tiene que utilizar en conjunto con -li y -lf. Es un condicional de frase dentro de los bloques, se descarta el bloque si la frase -bc no se encuentra dentro del mismo.
+-c y --conservar: Frase en string dentro de comillas. Conserva las líneas que contengan la frase
+-e y --excluir: Frase en string dentro de comillas. Se utiliza en conjunto a -c. Excluye las líneas que contengan la frase a pesar de ser conservadas por -c
+
+EJEMPLO DE TERMINAL:
+python filtrar_log.py -f 2026-09-08 -c "could not read help topic file:" -e "etab" -li "Studio PID:" -lf "Release:" -bc "Display:   :1" process_bids_AMCUS_2129.log
+'''
 from __future__ import print_function
 import argparse
 import getpass
 import io
 import os
 import re
-import shutil
 import sys
+import time
+import unicodedata
 
 CONFIG = 'filtrar_log.config'
 INICIO = b'Running script with settings'
@@ -18,26 +31,27 @@ RAYA = '-' * 89
 MARCA_BLOQUE = b'\x00\x00@@BLOQUE@@%d\x00\x00\n' # Lugar del titulo de cada bloque mientras no se sabe donde termina
 
 '''FRASES DEFAULT: SE ESCRIBEN EN EL .config LA PRIMERA VEZ; DESPUES SE EDITAN AHI'''
-CONFIG_INICIAL = u'''# Frases default de filtrar_log.py. Una por linea; las que empiezan con # se ignoran.
+CONFIG_INICIAL = u'''# OPTI FILTRADO - frases default de filtrar_log.py. Una por linea; las que empiezan con # se ignoran.
 # Sin distinguir mayusculas. Con el prefijo re: es expresion regular.
-# conservar: el log filtrado muestra SOLO las lineas que tienen alguna de estas frases.
-# excluir: de esas lineas, se quitan las que tambien tienen una frase de excluir (gana excluir).
-# Las lineas que no tienen ninguna frase de conservar no aparecen.
+#
+# COMO SE USAN
+# El archivo de salida tiene dos partes; cada linea va tal cual del log, seguida de su numero: <linea del log> linea N
+# 1. Frases de -c (terminal): debajo del contador de cada frase, sus lineas, sin las que tengan una frase de -e.
+#    Una frase de -c gana a [excluir] de este archivo; solo -e la quita.
+# 2. Frases default (este archivo): las lineas con una frase de [conservar], sin las que tengan una frase de
+#    [excluir] o de -e. Las lineas que ya salieron en la parte 1 no se repiten.
+# Una linea sin ninguna frase de -c ni de [conservar] no aparece.
 #
 # EJEMPLO COMPLETO
-# Si agregas esto (sin el # de adelante):
-#     [conservar]
-#     re:^SCRIPT_
-#     [excluir]
-#     SCRIPT_ERR_MARK_FILE
-# y en el log hay estas lineas:
-#     SCRIPT_ERR_MARK_FILE = .../20261019_140011.mark  -> se quita (empieza con SCRIPT_, pero tambien esta en excluir)
-#     SCRIPT_RUN_TYPE = prod                           -> se queda (re:^SCRIPT_ : empieza con SCRIPT_)
-#     Error! Pid:1601606  Mon Oct 19 14:04:00 2026     -> se queda (Error! es default de conservar)
-#     Error! GetTaskCol: Could not to find task column -> se quita (tiene Error!, pero GetTaskCol es default de excluir)
-#     Setting baseURL to http://studio-web01...        -> se quita (no tiene ninguna frase de conservar)
-#     CuiExit: shutdown complete.                      -> se quita (no tiene ninguna frase de conservar)
-# Para dejar de ver algo, borra su linea de [conservar] o ponle # adelante.
+# python filtrar_log.py -f 2026-09-08 -c "could not read help topic file:" -e "etab" process_bids_AMCUS_2129.log
+# con estas lineas en el log:
+#     read_help_topics: could not read help topic file: .../topics.list -> parte 1 (tiene la frase de -c; read_help_topics
+#                                                                          esta en [excluir], pero -c gana)
+#     could not read help topic file: .../x.etab                        -> se quita (tiene la frase de -c, pero tambien etab de -e)
+#     Error! Pid:1601606 ...                                            -> parte 2 (Error! esta en [conservar])
+#     Error! GetTaskCol: Could not to find task column                  -> se quita (GetTaskCol esta en [excluir])
+#     CuiExit: shutdown complete.                                       -> se quita (no tiene frase de -c ni de [conservar])
+# Para dejar de ver algo siempre, borra su linea de [conservar] o ponle # adelante.
 
 [conservar]
 Error!
@@ -176,6 +190,26 @@ def argumento(valor):
     return valor
 
 
+def corto(frase, largo=20):
+    '''"could not read help topic file:" -> "could-not-read-help-" (solo letras, numeros y guiones; sin acentos)'''
+    texto = unicodedata.normalize('NFKD', frase).encode('ascii', 'ignore').decode('ascii').lower()
+    return re.sub(r'[^a-z0-9]+', '-', texto).strip('-')[:largo].strip('-') or 'x'
+
+
+def nombre_de_salida(nombre, fechas, mas_conservar, mas_excluir, inicial, final, bloque_con, generado):
+    '''NOMBRE DEL OUTPUT: <log>__<fechas>__<filtros>__<generado>.log
+    process_bids_AMCUS_2129__20260908__c-could-not-read-help-_e-etab__20261121-171900.log
+    - fechas: un dia (20260908) o del primero al ultimo (20261019-20261021)
+    - filtros: c- (conservar), e- (excluir), li-, lf-, bc- con las primeras 20 letras de cada frase; sin frases: default
+    - generado: fecha y hora en que se corrio el script (no se sobreescriben outputs anteriores)'''
+    dias = fechas[0].replace('-', '') + ('' if len(fechas) == 1 else '-' + fechas[-1].replace('-', ''))
+    filtros = ['c-' + corto(f) for f in mas_conservar] + ['e-' + corto(f) for f in mas_excluir]
+    if inicial:
+        filtros += ['li-' + corto(inicial), 'lf-' + corto(final)] + ['bc-' + corto(f) for f in bloque_con]
+    filtros = '_'.join(filtros)[:120].strip('_-') or 'default'
+    return '%s__%s__%s__%s.log' % (os.path.splitext(nombre)[0], dias, filtros, generado)
+
+
 def frase_valida(frase):
     try:
         if frase.startswith(u're:'):
@@ -186,7 +220,7 @@ def frase_valida(frase):
         return False
 
 
-def filtrar(ruta, carpeta, usuario, fechas_pedidas, conservar, excluir, mas_conservar, mas_excluir, inicial=None, final=None, bloque_con=()):
+def filtrar(ruta, carpeta, usuario, comando, fechas_pedidas, conservar, excluir, mas_conservar, mas_excluir, inicial=None, final=None, bloque_con=()):
     adicionales = [f for i, f in enumerate(mas_conservar + mas_excluir) if f not in (mas_conservar + mas_excluir)[:i]]
     nombre = os.path.basename(ruta)
     cambios, corridas = cambios_de_fecha(ruta)
@@ -210,14 +244,18 @@ CON EL FRAGMENTO FINAL (LAS DOS INCLUIDAS). EL BLOQUE SOLO SE CORTA AL ENCONTRAR
 LA LINEA INICIAL, ES PARTE DEL MISMO BLOQUE. UN BLOQUE QUE EMPEZO EN UNA FECHA ELEGIDA SIGUE AUNQUE PASE A OTRO DIA
 SI EL LOG TERMINA SIN LA LINEA FINAL, ESE ULTIMO BLOQUE NO SE MUESTRA (SOLO SE AVISA)
 LOS BLOQUES Y EL FILTRADO VAN A DOS ARCHIVOS TEMPORALES; AL FINAL SE JUNTAN: PRIMERO LOS BLOQUES'''
-    contador = dict((frase, [0, 0, 0]) for frase in adicionales) # veces, primera linea, ultima linea
+    contador = dict((frase, [0, 0, 0, 0]) for frase in adicionales) # veces, primera linea, ultima linea, quitadas por -e
     bloques = []  # [primera linea, ultima linea, tiene una frase de -bc]
     dentro = False
-    rango = fechas[0].replace('-', '') + ('' if len(fechas) == 1 else '_a_' + fechas[-1].replace('-', ''))
-    salida = os.path.join(carpeta, '%s_filtrado_%s.log' % (os.path.splitext(nombre)[0], rango))
-    temporal_bloques, temporal_filtrado = salida + '.bloques.tmp', salida + '.tmp'
-    escritas, i, fecha, num = 0, 0, None, 0
-    with open(ruta, 'rb') as log, open(temporal_bloques, 'wb') as tmp_bloques, open(temporal_filtrado, 'wb') as tmp_filtrado:
+    ahora = time.localtime()
+    generado = time.strftime('%Y%m%d-%H%M%S', ahora)
+    salida = os.path.join(carpeta, nombre_de_salida(nombre, fechas, mas_conservar, mas_excluir, inicial, final, bloque_con, generado))
+    while os.path.exists(salida): # Dos corridas en el mismo segundo
+        salida = salida[:-4] + 'b.log'
+    temporal_bloques, temporal_filtrado, temporal_frases = salida + '.bloques.tmp', salida + '.tmp', salida + '.frases.tmp'
+    escritas, del_config, i, fecha, num = 0, 0, 0, None, 0
+    with open(ruta, 'rb') as log, open(temporal_bloques, 'wb') as tmp_bloques, open(temporal_filtrado, 'wb') as tmp_filtrado, \
+            open(temporal_frases, 'wb') as tmp_frases:
         for num, linea in enumerate(log, 1):
             while i < len(cambios) and cambios[i][0] <= num:
                 fecha, i = cambios[i][1], i + 1
@@ -243,34 +281,47 @@ LOS BLOQUES Y EL FILTRADO VAN A DOS ARCHIVOS TEMPORALES; AL FINAL SE JUNTAN: PRI
                 continue
 
             '''CONTADORES Y FILTRO POR FRASES'''
-            for frase in adicionales:
-                if coincide(frase, texto, minusculas):
-                    c = contador[frase]
-                    c[0], c[1], c[2] = c[0] + 1, c[1] or num, num
-            if not any(coincide(f, texto, minusculas) for f in conservar) or any(coincide(f, texto, minusculas) for f in excluir):
-                continue
-            tmp_filtrado.write(linea)
-            escritas += 1
+            encontradas = [f for f in adicionales if coincide(f, texto, minusculas)]
+            for frase in encontradas:
+                c = contador[frase]
+                c[0], c[1], c[2] = c[0] + 1, c[1] or num, num
+            de_c = [f for f in encontradas if f in mas_conservar]
+            if de_c: # Linea de -c: va bajo el contador de su frase, salvo que tenga una frase de -e
+                quitar = any(f in mas_excluir for f in encontradas)
+                for frase in de_c:
+                    if quitar:
+                        contador[frase][3] += 1
+                    else:
+                        tmp_frases.write(b'%d %d ' % (adicionales.index(frase), num) + linea.rstrip(b'\r\n') + b'\n')
+                escritas += not quitar
+                continue # Ya se mostro (o la quito -e): no se repite en la seccion del .config
+            if any(coincide(f, texto, minusculas) for f in conservar) and not any(coincide(f, texto, minusculas) for f in excluir):
+                tmp_filtrado.write(b'%d ' % num + linea.rstrip(b'\r\n') + b'\n') # Frases default del .config (y -e)
+                escritas += 1
+                del_config += 1
     sin_final = bloques.pop() if dentro else None # El log termino antes de la linea final: ese bloque no se muestra
 
     '''ENCABEZADO: DATOS DEL LOG; DESPUES DE LOS BLOQUES (SI SE PIDIERON) VAN LAS FRASES Y SUS CONTADORES'''
     inicio = [u'LOG ["%s"] FILTRADO' % nombre,
-              u'Generado por: %s' % usuario,
+              u'Generado por: %s el %s' % (usuario, time.strftime('%Y-%m-%d %H:%M:%S', ahora)),
+              u'Comando: %s' % comando,
               u'Fechas: %s' % u', '.join(fechas),
               RAYA]
     lineas = [u'Conservar [%s]' % u', '.join(mas_conservar),
                u'Excluir [%s]' % u', '.join(mas_excluir),
                u'Las frases default de conservar y excluir se encuentran en %s' % CONFIG,
                RAYA]
-    for frase in adicionales:
-        veces, primera, ultima = contador[frase]
+    def contador_de(frase):
+        veces, primera, ultima, quitadas = contador[frase]
         if veces == 0:
-            lineas.append(u'%s: No encontrado' % frase)
+            texto = u'%s: No encontrado' % frase
         elif veces == 1:
-            lineas.append(u'%s: Encontrado 1 vez en la linea %d' % (frase, primera))
+            texto = u'%s: Encontrado 1 vez en la linea %d' % (frase, primera)
         else:
-            lineas.append(u'%s: Encontrado %d veces de la linea %d a la linea %d' % (frase, veces, primera, ultima))
-    lineas.append(RAYA)
+            texto = u'%s: Encontrado %d veces de la linea %d a la linea %d' % (frase, veces, primera, ultima)
+        if quitadas:
+            texto += u' (%d quitadas por -e)' % quitadas
+        return (texto + u'\n').encode('utf-8')
 
     '''ARCHIVO FINAL: DATOS DEL LOG, BLOQUES (CADA UNO CON SU TITULO), FRASES CON SUS CONTADORES Y LOG FILTRADO
     LAS LINEAS DEL LOG VAN TAL CUAL EL ORIGINAL'''
@@ -301,10 +352,27 @@ LOS BLOQUES Y EL FILTRADO VAN A DOS ARCHIVOS TEMPORALES; AL FINAL SE JUNTAN: PRI
                         archivo.write(linea)
             archivo.write((RAYA + '\n').encode('ascii'))
         archivo.write(u'\n'.join(lineas).encode('utf-8') + b'\n')
+        '''CADA FRASE ADICIONAL CON SU CONTADOR; DEBAJO DE LAS DE -c, SUS LINEAS CONSERVADAS: [linea del log] linea N'''
+        for n, frase in enumerate(adicionales):
+            archivo.write(contador_de(frase))
+            if frase in mas_conservar:
+                with open(temporal_frases, 'rb') as temporal:
+                    for linea in temporal:
+                        indice, numero, original = linea.split(b' ', 2)
+                        if int(indice) == n:
+                            archivo.write(original.rstrip(b'\n') + b' linea ' + numero + b'\n')
+                archivo.write(b'\n')
+        if adicionales:
+            archivo.write((RAYA + '\n').encode('ascii'))
+        '''DESPUES, LAS LINEAS DE LAS FRASES DEFAULT DEL .config (SIN LAS DE -c, QUE YA SALIERON ARRIBA)'''
+        archivo.write((u'Frases default de %s: %d lineas\n' % (CONFIG, del_config)).encode('utf-8'))
         with open(temporal_filtrado, 'rb') as temporal:
-            shutil.copyfileobj(temporal, archivo)
+            for linea in temporal:
+                numero, original = linea.split(b' ', 1)
+                archivo.write(original.rstrip(b'\n') + b' linea ' + numero + b'\n')
     os.remove(temporal_bloques)
     os.remove(temporal_filtrado)
+    os.remove(temporal_frases)
     detalle = ' %d bloques |' % len([b for b in bloques if b[2]]) if inicial else ''
     print('%s: %s |%s %d lineas filtradas | %s' % (nombre, ', '.join(fechas), detalle, escritas, salida))
 
@@ -317,13 +385,16 @@ if __name__ == '__main__':
       --conservar "Cannot create gt" --conservar "re:LIMO\\+$" --excluir "Setting baseURL"
 
   - Toma solo las corridas que empezaron el 19 y el 20 de octubre (sin --fecha: menu para elegirlas).
-  - Muestra solo las lineas con "Cannot create gt", las que terminan en "LIMO+" y las de [conservar] del .config.
-  - De esas, quita las que tambien tienen "Setting baseURL" o una frase de [excluir] del .config.
-  - Las lineas que no tienen ninguna frase de conservar no aparecen.
-  - Escribe <usuario>/process_bids_filtrado_20261019_a_20261020.log con este encabezado:
+  - Primero, bajo su contador, las lineas con "Cannot create gt" o que terminan en "LIMO+" (-c),
+    sin las que tambien tienen "Setting baseURL" (-e). Sin -e salen todas.
+  - Despues, las lineas de [conservar] del .config, sin las de [excluir] ni las de -e (sin repetir las de -c).
+  - Cada linea va tal cual del log, seguida de: linea N
+  - Escribe <usuario>/process_bids__20261019-20261020__c-cannot-create-gt_c-re-limo_e-setting-baseurl__20261121-171900.log
+    (nombre: <log>__<fechas>__<filtros>__<fecha y hora de generacion>.log) con este encabezado:
 
       LOG ["process_bids.log"] FILTRADO
-      Generado por: usuario
+      Generado por: usuario el 2026-11-21 17:19:00
+      Comando: python filtrar_log.py process_bids.log --fecha 2026-10-19 ...
       Fechas: 2026-10-19, 2026-10-20
       -------------------------------------------------------------------------
       Conservar [Cannot create gt, re:LIMO\\+$]
@@ -331,10 +402,16 @@ if __name__ == '__main__':
       Las frases default de conservar y excluir se encuentran en filtrar_log.config
       -------------------------------------------------------------------------
       Cannot create gt: Encontrado 452 veces de la linea 1350 a la linea 74419
+      (cada linea con "Cannot create gt", tal cual del log, seguida de: linea N)
+
       re:LIMO\\+$: Encontrado 452 veces de la linea 1350 a la linea 74419
+      (cada linea que termina en "LIMO+", seguida de: linea N)
+
       Setting baseURL: Encontrado 474 veces de la linea 647 a la linea 75430
       -------------------------------------------------------------------------
-      (las lineas del log original que quedaron, tal cual)
+      Frases default de filtrar_log.config: 30 lineas
+      Error! Pid:1601606  Mon Oct 19 14:04:00 2026  User:amxcrewbidsvc linea 2149
+      ...
 
 bloques entre dos lineas (-li y -lf, siempre juntas; pueden ser solo un fragmento de la linea):
   python filtrar_log.py process_bids.log -f 2026-10-19 -li "LEG AM" -lf "LEG LA"
@@ -352,7 +429,9 @@ forma corta: -f es --fecha, -c es --conservar, -e es --excluir. El mismo ejemplo
   python filtrar_log.py process_bids.log -f 2026-10-19 -f 2026-10-20 -c "Cannot create gt" -c "re:LIMO\\+$" -e "Setting baseURL"
 
 frases: sin distinguir mayusculas; con el prefijo re: son expresion regular.
-Solo se muestran las lineas con una frase de conservar; si tambien tienen una de excluir, se quitan (gana excluir).
+Solo se muestran las lineas con una frase de -c o de [conservar]; si tambien tienen una de excluir, se quitan.
+Una frase de -c gana a [excluir] del .config; solo -e la quita. Si -e quita lineas de una frase de -c,
+el contador lo dice: (N quitadas por -e).
 Las frases default estan en <usuario>/filtrar_log.config; se crea la primera vez.''')
     parser.add_argument('logs', nargs='+', help='uno o mas logs')
     parser.add_argument('-f', '--fecha', action='append', default=[], help='AAAA-MM-DD; se puede repetir. Sin -f sale un menu (Enter = ultimas 3; sin terminal, como en cron, toma las ultimas 3)')
@@ -391,12 +470,14 @@ Las frases default estan en <usuario>/filtrar_log.config; se crea la primera vez
         sys.exit(1)
     if not conservar:
         print('Aviso: no hay frases de conservar (ni en %s ni con -c): el log filtrado por frases saldra vacio' % CONFIG)
+    comando = u' '.join([u'python', os.path.basename(argumento(sys.argv[0]))] +
+                        [u'"%s"' % x if (u' ' in x or not x) else x for x in map(argumento, sys.argv[1:])])
     try:
         for ruta in args.logs:
             if not os.path.isfile(ruta):
                 print('%s: no existe, se omite' % ruta)
                 continue
-            filtrar(ruta, carpeta, usuario, [argumento(f) for f in args.fecha], conservar, excluir, mas_conservar, mas_excluir,
+            filtrar(ruta, carpeta, usuario, comando, [argumento(f) for f in args.fecha], conservar, excluir, mas_conservar, mas_excluir,
                     inicial, final, bloque_con)
     except KeyboardInterrupt: # Ctrl-C en el menu o mientras filtra
         print('\nCancelado.')
