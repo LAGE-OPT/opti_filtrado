@@ -1,4 +1,4 @@
-# Logs (pesados y con datos de operación)
+# Logs
 *.log
 *.out
 *.log.gz
@@ -6,3 +6,6 @@
 # Python
 __pycache__/
 *.pyc
+
+# Direcotios
+/usuarios

@@ -1,25 +1,28 @@
 # filtrar_log.py
 
-Filtra un log de corridas de Jeppesen Studio (`process_bids.log`, `nohup.out`, `process_requests.log`) por fecha y por palabras clave. Lo usa el equipo de soporte de AMX para revisar rápido los logs que comparten los clientes.
+Herramienta para filtrar uno o más logs de Jeppesen Studio (`process_bids.log`, `nohup.out`, `process_requests.log`) por fecha y por palabras clave. Lo usa el equipo de soporte de AMX para revisar rápido los logs que comparten los clientes.
 
-El resultado es un archivo nuevo. Trae un encabezado que dice cuántas veces aparece cada frase pedida. Debajo van las líneas del log que interesan, copiadas tal cual del original. El log original nunca se modifica.
+El resultado es un encabezado que dice cuántas veces aparece cada frase pedida. Debajo van las líneas del log que interesan, copiadas tal cual del original. El log original nunca se modifica.
 
-## Requisitos
+### Ejecutable en:
 
-- Python 2.7 o Python 3. Corre igual en los dos.
-- Solo usa la librería estándar de Python: no hay nada que instalar.
 - Linux o Windows.
-- Es un solo archivo: no necesita `diagnostico.py`, `leer_logs.py` ni `verificar_bloques.py`.
+- Python 2.7 o Python 3. Corre igual en los dos.
+    - Solo usa la librería estándar de Python: no hay nada que instalar.
 
-## Uso rápido
+## Uso básico
 
 ```
-python filtrar_log.py process_bids.log
+python filtrar_log.py archivo.log
 ```
 
-1. El script lista las fechas que hay en el log y cuántas corridas tiene cada una.
-2. Eliges las fechas.
-3. El script escribe el log filtrado en `<carpeta actual>/<tu usuario>/`.
+1. Últimas tres fechas, con las palabras por default del archivo .config
+2. El script lista las fechas que hay en el log y cuántas corridas tiene cada una.
+    1. Estas fechas solo son compatibles con process_bids, process_requests y nohup.out
+3. Eliges las fechas.
+4. El script escribe el log filtrado en `<carpeta actual>/<tu usuario>/`, junto a un archivo `.config`.
+
+#### El menú solo se despliega si no se determina una fecha
 
 ```
 Fechas en process_bids.log:
@@ -31,18 +34,18 @@ Elige fechas (ejemplo: 1,3 o 2-4; T = todas; Enter = ultimas 3):
 
 ## Opciones
 
-| Opción | Forma corta | Qué hace |
+|Opción|Forma corta|Qué hace|
 |---|---|---|
-| `--fecha AAAA-MM-DD` | `-f` | Fecha a filtrar. Se puede repetir. Si se usa, no sale el menú. |
-| `--conservar "frase"` | `-c` | Muestra las líneas que tienen esta frase, además de las de `[conservar]` del `.config`. Se puede repetir. |
-| `--bloque-con "frase"` | `-bc` | Con `-li` y `-lf`: muestra solo los bloques que tienen esta frase. Se puede repetir; basta con que un bloque tenga una. |
-| `--excluir "frase"` | `-e` | Quita las líneas que tienen esta frase, aunque tengan una de conservar. Se puede repetir. |
-| `--linea-inicial "fragmento"` | `-li` | Línea donde empieza cada bloque. Va siempre con `-lf`. |
-| `--linea-final "fragmento"` | `-lf` | Línea donde termina cada bloque. Va siempre con `-li`. |
-| `--delete` | | Borra todos los outputs de este script en `<carpeta actual>/<usuario>/`. Pide confirmación. No toca los logs originales ni el `.config`. |
-| `--help` | `-h` | Ayuda con un ejemplo completo. |
+|`--fecha AAAA-MM-DD`|`-f`|Fecha a filtrar. Se puede repetir. Si se usa, no sale el menú.|
+|`--conservar "frase"`|`-c`|Muestra las líneas que tienen esta frase, además de las de `[conservar]` del `.config`. Se puede repetir.|
+|`--bloque-con "frase"`|`-bc`|Con `-li` y `-lf`: muestra solo los bloques que tienen esta frase. Se puede repetir; basta con que un bloque tenga una.|
+|`--excluir "frase"`|`-e`|Quita las líneas que tienen esta frase, aunque tengan una de conservar. Se puede repetir.|
+|`--linea-inicial "fragmento"`|`-li`|Línea donde empieza cada bloque. Va siempre con `-lf`.|
+|`--linea-final "fragmento"`|`-lf`|Línea donde termina cada bloque. Va siempre con `-li`.|
+|`--delete`||Borra todos los outputs de este script en `<carpeta actual>/<usuario>/`. Pide confirmación. No toca los logs originales ni el `.config`.|
+|`--help`|`-h`|Ayuda con un ejemplo completo.|
 
-Se puede pasar más de un log; cada uno tiene su propio menú y su propio archivo de salida.
+**Se puede filtrar más de un log a la vez, pero son procesos separados. Una ejecución por LOG. Un menú de fechas por LOG**
 
 ## Nombre del archivo de salida
 
@@ -57,33 +60,21 @@ Se puede pasar más de un log; cada uno tiene su propio menú y su propio archiv
 - Si las fechas cambian, el output lleva el siguiente número de la carpeta.
 - Las frases usadas quedan en el encabezado del archivo (`Conservar`, `Excluir` y `Comando:`), no en el nombre.
 
-## Borrar los outputs (--delete)
-
-```
-python filtrar_log.py --delete
-```
-
-- Lista los outputs que va a borrar y pide confirmación: hay que escribir `s`. Cualquier otra respuesta no borra nada.
-- Solo borra, dentro de `<carpeta actual>/<usuario>/`, archivos con nombre de output (`..._filtrado_AAAAMMDD.log` o `..._filtrado_AAAAMMDD_a_AAAAMMDD.log`, con o sin número) y los temporales `.tmp` que deja una corrida interrumpida. Después de borrar, la numeración vuelve a empezar en 1.
-- Nunca borra los logs originales, el `filtrar_log.config`, otros archivos de la carpeta ni enlaces simbólicos.
-- Sin terminal (por ejemplo, en cron) no borra nada; solo lista lo que habría borrado.
-- Se usa solo: si además pones un log o frases, se ignoran.
-
 ## Reglas del filtro
 
-1. **Fecha.** Solo importa el día; la hora se ignora. Cada corrida completa queda en el día en que empezó, aunque termine al día siguiente.
+1. **Fecha.** En formato AAAA-MM-DD
 2. **Frases de `-c`.** Primero salen, debajo del contador de cada frase, las líneas con esa frase, sin las que tengan una frase de `-e`. Sin `-e` salen todas. Una frase de `-c` gana a `[excluir]` del `.config`; solo `-e` la quita.
 3. **Frases default del `.config`.** Después salen las líneas con una frase de `[conservar]`, sin las que tengan una frase de `[excluir]` o de `-e`. Las que ya salieron con `-c` no se repiten.
 4. Cada línea va tal cual del log, seguida de `linea N` (su número en el log original).
 5. **Frases.**
-   - No distinguen mayúsculas.
-   - Con el prefijo `re:` son una expresión regular, por ejemplo `re:LIMO\+$`.
-   - Una expresión regular inválida se avisa y se omite.
+    - No distinguen mayúsculas.
+    - Con el prefijo `re:` son una expresión regular (se busca con el módulo `re` de Python).
+    - Una expresión regular inválida se avisa y se omite.
 
 ## Ejemplo completo
 
 ```
-python filtrar_log.py process_bids.log -f 2026-10-19 -f 2026-10-20 -c "Cannot create gt" -c "re:LIMO\+$" -e "Setting baseURL"
+python filtrar_log.py process_bids.log -f 2026-10-19 -f 2026-10-20 -c "Cannot create gt" -c "LIMO+" -e "Setting baseURL"
 ```
 
 Escribe `<usuario>/1_process_bids_filtrado_20261019_a_20261020.log`:
@@ -91,10 +82,10 @@ Escribe `<usuario>/1_process_bids_filtrado_20261019_a_20261020.log`:
 ```
 LOG ["process_bids.log"] FILTRADO
 Generado por: usuario el 2026-11-21 17:19:00
-Comando: python filtrar_log.py process_bids.log -f 2026-10-19 -f 2026-10-20 -c "Cannot create gt" -c re:LIMO\+$ -e "Setting baseURL"
+Comando: python filtrar_log.py process_bids.log -f 2026-10-19 -f 2026-10-20 -c "Cannot create gt" -c LIMO+ -e "Setting baseURL"
 Fechas: 2026-10-19, 2026-10-20
 -----------------------------------------------------------------------------------------
-Conservar [Cannot create gt, re:LIMO\+$]
+Conservar [Cannot create gt, LIMO+]
 Excluir [Setting baseURL]
 Las frases default de conservar y excluir se encuentran en filtrar_log.config
 -----------------------------------------------------------------------------------------
@@ -103,12 +94,12 @@ avi_rml_match_leg: Cannot create gt from str: SEA+0000+OD+++20261019+20261019+17
 ...
 avi_rml_match_leg: Cannot create gt from str: ...+LIMO+ linea 74419
 
-re:LIMO\+$: Encontrado 452 veces de la linea 1350 a la linea 74419
+LIMO+: Encontrado 452 veces de la linea 1350 a la linea 74419
 (las mismas líneas, cada una con su número)
 
 Setting baseURL: Encontrado 474 veces de la linea 647 a la linea 75430
 -----------------------------------------------------------------------------------------
-Frases default de filtrar_log.config: 30 lineas
+Frases default de filtrar_log.config: 102 lineas
 Error! Pid:1601606  Mon Oct 19 14:04:00 2026  User:amxcrewbidsvc linea 2149
 ...
 ```
@@ -124,18 +115,37 @@ Después de la última raya va `Frases default de filtrar_log.config: N lineas` 
 Con `-li` y `-lf`, el script agrega bloques completos: desde una línea que tenga el fragmento inicial hasta la siguiente que tenga el fragmento final, incluidas las dos. Los bloques van primero y después el resultado del filtro de conservar y excluir, como siempre.
 
 ```
-python filtrar_log.py process_bids.log -f 2026-10-19 -li "LEG AM" -lf "LEG LA"
+python filtrar_log.py -c "could not read help topic file:" -li "Studio PID:" -lf "Release:" -bc "Display:   :1" -c "amxcrewbidsvc" process_bids_AMCUS_2129.log
 ```
 
+Sin `-f` sale el menú de fechas. Con Enter (últimas 3 fechas: 2026-10-05, 2026-10-06 y 2026-10-19) escribe:
+
 ```
-Bloques desde "LEG AM" hasta "LEG LA": 21 encontrados
------ Bloque 1: de la linea 99 a la linea 376 (278 lineas) -----
-LEG AM 8592  1   7     04Oct2026 : (Trip    25218) Not operating created.
+Bloques desde "Studio PID:" hasta "Release:" con [Display:   :1]: 15 de 16 encontrados
+----- Bloque 2: de la linea 1430843 a la linea 1430857 (15 lineas) -----
+Studio PID: 183560
+Hostname:   app12.dal09.amx.jepphost.com
+Username:   amxcrewbidsvc
 ...
-LEG LA 2413  1   5     23Oct2026 : (Trip    83115) Not operating created.
------ Bloque 2: de la linea 380 a la linea 394 (15 lineas) -----
+X Server
+ Display:   :1
+ Protocol:  11.0
+ Vendor:    The X.Org Foundation
+ Release:   12011000
+----- Bloque 3: de la linea 1431235 a la linea 1431249 (15 lineas) -----
+...
+-----------------------------------------------------------------------------------------
+Conservar [could not read help topic file:, amxcrewbidsvc]
+Excluir []
+Las frases default de conservar y excluir se encuentran en filtrar_log.config
+-----------------------------------------------------------------------------------------
+could not read help topic file:: Encontrado 16 veces de la linea 1429525 a la linea 1482876
+...
+amxcrewbidsvc: Encontrado 48 veces de la linea 1429510 a la linea 1482923
 ...
 ```
+
+El bloque 1 (línea 1429508) no se muestra porque su display es `:2`, no `:1`; por eso la lista empieza en el bloque 2.
 
 Después de los bloques siguen las frases, sus contadores y el log filtrado por conservar y excluir, igual que sin `-li` y `-lf`. Todas las líneas del log van tal cual el original.
 

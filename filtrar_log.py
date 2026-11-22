@@ -371,7 +371,7 @@ LOS BLOQUES Y EL FILTRADO VAN A DOS ARCHIVOS TEMPORALES; AL FINAL SE JUNTAN: PRI
     detalle = ' %d bloques |' % len([b for b in bloques if b[2]]) if inicial else ''
     print('%s: %s |%s %d lineas filtradas | %s' % (nombre, ', '.join(fechas), detalle, escritas, salida))
 
-'''--delete: SOLO BORRA LOS OUTPUTS DE ESTE SCRIPT EN <carpeta actual>/<usuario>/. NUNCA LOS LOGS ORIGINALES NI EL .config'''
+'''--delete: SOLO BORRA LOS OUTPUTS DE ESTE SCRIPT EN <carpeta actual>/usuarios/<usuario>/. NUNCA LOS LOGS ORIGINALES NI EL .config'''
 OUTPUT = re.compile(r'_filtrado_\d{8}(_a_\d{8})?\.log(\.bloques\.tmp|\.frases\.tmp|\.tmp)?$')
 
 
@@ -402,18 +402,18 @@ def borrar_salidas(carpeta):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Filtra un log por fecha y por palabras clave. Escribe el resultado en <carpeta actual>/<usuario>/.',
+        description='Filtra un log por fecha y por palabras clave. Escribe el resultado en <carpeta actual>/usuarios/<usuario>/.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''ejemplo completo:
   python filtrar_log.py process_bids.log --fecha 2026-10-19 --fecha 2026-10-20 \\
-      --conservar "Cannot create gt" --conservar "re:LIMO\\+$" --excluir "Setting baseURL"
+      --conservar "Cannot create gt" --conservar "LIMO+" --excluir "Setting baseURL"
 
   - Toma solo las corridas que empezaron el 19 y el 20 de octubre (sin --fecha: menu para elegirlas).
-  - Primero, bajo su contador, las lineas con "Cannot create gt" o que terminan en "LIMO+" (-c),
+  - Primero, bajo su contador, las lineas con "Cannot create gt" o con "LIMO+" (-c),
     sin las que tambien tienen "Setting baseURL" (-e). Sin -e salen todas.
   - Despues, las lineas de [conservar] del .config, sin las de [excluir] ni las de -e (sin repetir las de -c).
   - Cada linea va tal cual del log, seguida de: linea N
-  - Escribe <usuario>/1_process_bids_filtrado_20261019_a_20261020.log con este encabezado
+  - Escribe usuarios/<usuario>/1_process_bids_filtrado_20261019_a_20261020.log con este encabezado
     (mismo log y mismas fechas: se sobreescribe; fechas distintas: siguiente numero):
 
       LOG ["process_bids.log"] FILTRADO
@@ -421,19 +421,19 @@ if __name__ == '__main__':
       Comando: python filtrar_log.py process_bids.log --fecha 2026-10-19 ...
       Fechas: 2026-10-19, 2026-10-20
       -------------------------------------------------------------------------
-      Conservar [Cannot create gt, re:LIMO\\+$]
+      Conservar [Cannot create gt, LIMO+]
       Excluir [Setting baseURL]
       Las frases default de conservar y excluir se encuentran en filtrar_log.config
       -------------------------------------------------------------------------
       Cannot create gt: Encontrado 452 veces de la linea 1350 a la linea 74419
       (cada linea con "Cannot create gt", tal cual del log, seguida de: linea N)
 
-      re:LIMO\\+$: Encontrado 452 veces de la linea 1350 a la linea 74419
-      (cada linea que termina en "LIMO+", seguida de: linea N)
+      LIMO+: Encontrado 452 veces de la linea 1350 a la linea 74419
+      (cada linea con "LIMO+", seguida de: linea N)
 
       Setting baseURL: Encontrado 474 veces de la linea 647 a la linea 75430
       -------------------------------------------------------------------------
-      Frases default de filtrar_log.config: 30 lineas
+      Frases default de filtrar_log.config: 102 lineas
       Error! Pid:1601606  Mon Oct 19 14:04:00 2026  User:amxcrewbidsvc linea 2149
       ...
 
@@ -451,20 +451,20 @@ bloques entre dos lineas (-li y -lf, siempre juntas; pueden ser solo un fragment
 
 borrar outputs:
   python filtrar_log.py --delete
-  - Borra los outputs de este script en <usuario>/ despues de pedir confirmacion (s).
+  - Borra los outputs de este script en usuarios/<usuario>/ despues de pedir confirmacion (s).
   - No toca los logs originales ni filtrar_log.config. Sin terminal no borra nada.
 
 forma corta: -f es --fecha, -c es --conservar, -e es --excluir. El mismo ejemplo:
-  python filtrar_log.py process_bids.log -f 2026-10-19 -f 2026-10-20 -c "Cannot create gt" -c "re:LIMO\\+$" -e "Setting baseURL"
+  python filtrar_log.py process_bids.log -f 2026-10-19 -f 2026-10-20 -c "Cannot create gt" -c "LIMO+" -e "Setting baseURL"
 
 frases: sin distinguir mayusculas; con el prefijo re: son expresion regular.
 Solo se muestran las lineas con una frase de -c o de [conservar]; si tambien tienen una de excluir, se quitan.
 Una frase de -c gana a [excluir] del .config; solo -e la quita. Si -e quita lineas de una frase de -c,
 el contador lo dice: (N quitadas por -e).
-Las frases default estan en <usuario>/filtrar_log.config; se crea la primera vez.''')
+Las frases default estan en usuarios/<usuario>/filtrar_log.config; se crea la primera vez.''')
     parser.add_argument('logs', nargs='*', help='uno o mas logs')
     parser.add_argument('--delete', action='store_true',
-                        help='borra todos los outputs de este script en <carpeta actual>/<usuario>/ (pide confirmacion); '
+                        help='borra todos los outputs de este script en <carpeta actual>/usuarios/<usuario>/ (pide confirmacion); '
                              'no toca los logs originales ni el .config')
     parser.add_argument('-f', '--fecha', action='append', default=[], help='AAAA-MM-DD; se puede repetir. Sin -f sale un menu (Enter = ultimas 3; sin terminal, como en cron, toma las ultimas 3)')
     parser.add_argument('-c', '--conservar', action='append', default=[], help='frase de las lineas que se muestran; se puede repetir')
@@ -476,7 +476,7 @@ Las frases default estan en <usuario>/filtrar_log.config; se crea la primera vez
     args = parser.parse_args()
     if args.delete:
         try:
-            borrar_salidas(os.path.join(os.getcwd(), getpass.getuser()))
+            borrar_salidas(os.path.join(os.getcwd(), 'usuarios', getpass.getuser()))
         except KeyboardInterrupt:
             print('\nCancelado.')
         sys.exit(0)
@@ -490,9 +490,9 @@ Las frases default estan en <usuario>/filtrar_log.config; se crea la primera vez
         if not re.match(r'^\d{4}-\d\d-\d\d$', fecha):
             parser.error('la fecha debe ser AAAA-MM-DD, por ejemplo 2026-10-19')
 
-    '''CARPETA CON EL NOMBRE DEL USUARIO, AHI VAN EL .config Y LOS LOGS FILTRADOS'''
+    '''CARPETA usuarios/<usuario>: AHI VAN EL .config Y LOS LOGS FILTRADOS'''
     usuario = getpass.getuser()
-    carpeta = os.path.join(os.getcwd(), usuario)
+    carpeta = os.path.join(os.getcwd(), 'usuarios', usuario)
     if not os.path.isdir(carpeta):
         os.makedirs(carpeta)
     default = leer_config(os.path.join(carpeta, CONFIG))
