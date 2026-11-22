@@ -22,12 +22,12 @@ import os
 import re
 import sys
 import time
-import unicodedata
 
 CONFIG = 'filtrar_log.config'
 INICIO = b'Running script with settings'
 MESES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 RAYA = '-' * 89
+NUMERADO = re.compile(r'^\d+_.+_filtrado_\d{8}(_a_\d{8})?\.log$') # Outputs con numero: 1_process_bids_filtrado_20261019.log
 MARCA_BLOQUE = b'\x00\x00@@BLOQUE@@%d\x00\x00\n' # Lugar del titulo de cada bloque mientras no se sabe donde termina
 
 '''FRASES DEFAULT: SE ESCRIBEN EN EL .config LA PRIMERA VEZ; DESPUES SE EDITAN AHI'''
@@ -190,24 +190,22 @@ def argumento(valor):
     return valor
 
 
-def corto(frase, largo=20):
-    '''"could not read help topic file:" -> "could-not-read-help-" (solo letras, numeros y guiones; sin acentos)'''
-    texto = unicodedata.normalize('NFKD', frase).encode('ascii', 'ignore').decode('ascii').lower()
-    return re.sub(r'[^a-z0-9]+', '-', texto).strip('-')[:largo].strip('-') or 'x'
-
-
-def nombre_de_salida(nombre, fechas, mas_conservar, mas_excluir, inicial, final, bloque_con, generado):
-    '''NOMBRE DEL OUTPUT: <log>__<fechas>__<filtros>__<generado>.log
-    process_bids_AMCUS_2129__20260908__c-could-not-read-help-_e-etab__20261121-171900.log
-    - fechas: un dia (20260908) o del primero al ultimo (20261019-20261021)
-    - filtros: c- (conservar), e- (excluir), li-, lf-, bc- con las primeras 20 letras de cada frase; sin frases: default
-    - generado: fecha y hora en que se corrio el script (no se sobreescriben outputs anteriores)'''
-    dias = fechas[0].replace('-', '') + ('' if len(fechas) == 1 else '-' + fechas[-1].replace('-', ''))
-    filtros = ['c-' + corto(f) for f in mas_conservar] + ['e-' + corto(f) for f in mas_excluir]
-    if inicial:
-        filtros += ['li-' + corto(inicial), 'lf-' + corto(final)] + ['bc-' + corto(f) for f in bloque_con]
-    filtros = '_'.join(filtros)[:120].strip('_-') or 'default'
-    return '%s__%s__%s__%s.log' % (os.path.splitext(nombre)[0], dias, filtros, generado)
+def nombre_de_salida(carpeta, nombre, fechas):
+    '''NOMBRE DEL OUTPUT: <n>_<log>_filtrado_<fechas>.log
+    1_process_bids_AMCUS_2129_filtrado_20260908_a_20261019.log
+    2_process_bids_AMCUS_2129_filtrado_20260908.log
+    SI YA HAY UN OUTPUT DEL MISMO LOG Y LAS MISMAS FECHAS, SE SOBREESCRIBE (CONSERVA SU NUMERO);
+    SI NO, LLEVA EL SIGUIENTE NUMERO DE LA CARPETA'''
+    rango = fechas[0].replace('-', '') + ('' if len(fechas) == 1 else '_a_' + fechas[-1].replace('-', ''))
+    base = '%s_filtrado_%s.log' % (os.path.splitext(nombre)[0], rango)
+    ultimo = 0
+    for archivo in os.listdir(carpeta):
+        numero = re.match(r'^(\d+)_(.+)$', archivo)
+        if numero and numero.group(2) == base:
+            return os.path.join(carpeta, archivo)
+        if numero and NUMERADO.search(archivo):
+            ultimo = max(ultimo, int(numero.group(1)))
+    return os.path.join(carpeta, '%d_%s' % (ultimo + 1, base))
 
 
 def frase_valida(frase):
@@ -248,10 +246,7 @@ LOS BLOQUES Y EL FILTRADO VAN A DOS ARCHIVOS TEMPORALES; AL FINAL SE JUNTAN: PRI
     bloques = []  # [primera linea, ultima linea, tiene una frase de -bc]
     dentro = False
     ahora = time.localtime()
-    generado = time.strftime('%Y%m%d-%H%M%S', ahora)
-    salida = os.path.join(carpeta, nombre_de_salida(nombre, fechas, mas_conservar, mas_excluir, inicial, final, bloque_con, generado))
-    while os.path.exists(salida): # Dos corridas en el mismo segundo
-        salida = salida[:-4] + 'b.log'
+    salida = nombre_de_salida(carpeta, nombre, fechas)
     temporal_bloques, temporal_filtrado, temporal_frases = salida + '.bloques.tmp', salida + '.tmp', salida + '.frases.tmp'
     escritas, del_config, i, fecha, num = 0, 0, 0, None, 0
     with open(ruta, 'rb') as log, open(temporal_bloques, 'wb') as tmp_bloques, open(temporal_filtrado, 'wb') as tmp_filtrado, \
@@ -376,6 +371,35 @@ LOS BLOQUES Y EL FILTRADO VAN A DOS ARCHIVOS TEMPORALES; AL FINAL SE JUNTAN: PRI
     detalle = ' %d bloques |' % len([b for b in bloques if b[2]]) if inicial else ''
     print('%s: %s |%s %d lineas filtradas | %s' % (nombre, ', '.join(fechas), detalle, escritas, salida))
 
+'''--delete: SOLO BORRA LOS OUTPUTS DE ESTE SCRIPT EN <carpeta actual>/<usuario>/. NUNCA LOS LOGS ORIGINALES NI EL .config'''
+OUTPUT = re.compile(r'_filtrado_\d{8}(_a_\d{8})?\.log(\.bloques\.tmp|\.frases\.tmp|\.tmp)?$')
+
+
+def borrar_salidas(carpeta):
+    if not os.path.isdir(carpeta):
+        print('No hay outputs que borrar: no existe %s' % carpeta)
+        return
+    archivos = sorted(a for a in os.listdir(carpeta) if OUTPUT.search(a) and os.path.isfile(os.path.join(carpeta, a))
+                      and not os.path.islink(os.path.join(carpeta, a)))
+    if not archivos:
+        print('No hay outputs que borrar en %s' % carpeta)
+        return
+    for archivo in archivos:
+        print('  ' + archivo)
+    if not sys.stdin.isatty():
+        print('Sin terminal no se borra nada: corre --delete desde una terminal para confirmar')
+        return
+    print('Se borraran %d outputs de %s (los logs originales y %s no se tocan). Escribe s para confirmar: '
+          % (len(archivos), carpeta, CONFIG), end='')
+    sys.stdout.flush()
+    if sys.stdin.readline().strip().lower() not in ('s', 'si', 'y', 'yes'):
+        print('No se borro nada.')
+        return
+    for archivo in archivos:
+        os.remove(os.path.join(carpeta, archivo))
+    print('%d outputs borrados.' % len(archivos))
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Filtra un log por fecha y por palabras clave. Escribe el resultado en <carpeta actual>/<usuario>/.',
@@ -389,8 +413,8 @@ if __name__ == '__main__':
     sin las que tambien tienen "Setting baseURL" (-e). Sin -e salen todas.
   - Despues, las lineas de [conservar] del .config, sin las de [excluir] ni las de -e (sin repetir las de -c).
   - Cada linea va tal cual del log, seguida de: linea N
-  - Escribe <usuario>/process_bids__20261019-20261020__c-cannot-create-gt_c-re-limo_e-setting-baseurl__20261121-171900.log
-    (nombre: <log>__<fechas>__<filtros>__<fecha y hora de generacion>.log) con este encabezado:
+  - Escribe <usuario>/1_process_bids_filtrado_20261019_a_20261020.log con este encabezado
+    (mismo log y mismas fechas: se sobreescribe; fechas distintas: siguiente numero):
 
       LOG ["process_bids.log"] FILTRADO
       Generado por: usuario el 2026-11-21 17:19:00
@@ -425,6 +449,11 @@ bloques entre dos lineas (-li y -lf, siempre juntas; pueden ser solo un fragment
     basta una). Ejemplo, solo los errores del vuelo duplicado MTY4044:
       python filtrar_log.py process_bids.log -li "Error! Pid" -lf "Legend:" -bc "MTY4044OD"
 
+borrar outputs:
+  python filtrar_log.py --delete
+  - Borra los outputs de este script en <usuario>/ despues de pedir confirmacion (s).
+  - No toca los logs originales ni filtrar_log.config. Sin terminal no borra nada.
+
 forma corta: -f es --fecha, -c es --conservar, -e es --excluir. El mismo ejemplo:
   python filtrar_log.py process_bids.log -f 2026-10-19 -f 2026-10-20 -c "Cannot create gt" -c "re:LIMO\\+$" -e "Setting baseURL"
 
@@ -433,7 +462,10 @@ Solo se muestran las lineas con una frase de -c o de [conservar]; si tambien tie
 Una frase de -c gana a [excluir] del .config; solo -e la quita. Si -e quita lineas de una frase de -c,
 el contador lo dice: (N quitadas por -e).
 Las frases default estan en <usuario>/filtrar_log.config; se crea la primera vez.''')
-    parser.add_argument('logs', nargs='+', help='uno o mas logs')
+    parser.add_argument('logs', nargs='*', help='uno o mas logs')
+    parser.add_argument('--delete', action='store_true',
+                        help='borra todos los outputs de este script en <carpeta actual>/<usuario>/ (pide confirmacion); '
+                             'no toca los logs originales ni el .config')
     parser.add_argument('-f', '--fecha', action='append', default=[], help='AAAA-MM-DD; se puede repetir. Sin -f sale un menu (Enter = ultimas 3; sin terminal, como en cron, toma las ultimas 3)')
     parser.add_argument('-c', '--conservar', action='append', default=[], help='frase de las lineas que se muestran; se puede repetir')
     parser.add_argument('-li', '--linea-inicial', help='fragmento de la linea donde empieza cada bloque (con -lf)')
@@ -442,6 +474,14 @@ Las frases default estan en <usuario>/filtrar_log.config; se crea la primera vez
                         help='solo muestra los bloques de -li/-lf que tienen esta frase; se puede repetir (basta una)')
     parser.add_argument('-e', '--excluir', action='append', default=[], help='quita las lineas que la tengan, aunque tengan una de conservar; se puede repetir')
     args = parser.parse_args()
+    if args.delete:
+        try:
+            borrar_salidas(os.path.join(os.getcwd(), getpass.getuser()))
+        except KeyboardInterrupt:
+            print('\nCancelado.')
+        sys.exit(0)
+    if not args.logs:
+        parser.error('indica uno o mas logs (o --delete para borrar los outputs)')
     if bool(args.linea_inicial) != bool(args.linea_final):
         parser.error('-li y -lf van juntas: indica la linea inicial y la final')
     if args.bloque_con and not args.linea_inicial:

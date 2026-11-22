@@ -31,37 +31,43 @@ Elige fechas (ejemplo: 1,3 o 2-4; T = todas; Enter = ultimas 3):
 
 ## Opciones
 
-|Opción|Forma corta|Qué hace|
+| Opción | Forma corta | Qué hace |
 |---|---|---|
-|`--fecha AAAA-MM-DD`|`-f`|Fecha a filtrar. Se puede repetir. Si se usa, no sale el menú.|
-|`--conservar "frase"`|`-c`|Muestra las líneas que tienen esta frase, además de las de `[conservar]` del `.config`. Se puede repetir.|
-|`--bloque-con "frase"`|`-bc`|Con `-li` y `-lf`: muestra solo los bloques que tienen esta frase. Se puede repetir; basta con que un bloque tenga una.|
-|`--excluir "frase"`|`-e`|Quita las líneas que tienen esta frase, aunque tengan una de conservar. Se puede repetir.|
-|`--linea-inicial "fragmento"`|`-li`|Línea donde empieza cada bloque. Va siempre con `-lf`.|
-|`--linea-final "fragmento"`|`-lf`|Línea donde termina cada bloque. Va siempre con `-li`.|
-|`--help`|`-h`|Ayuda con un ejemplo completo.|
+| `--fecha AAAA-MM-DD` | `-f` | Fecha a filtrar. Se puede repetir. Si se usa, no sale el menú. |
+| `--conservar "frase"` | `-c` | Muestra las líneas que tienen esta frase, además de las de `[conservar]` del `.config`. Se puede repetir. |
+| `--bloque-con "frase"` | `-bc` | Con `-li` y `-lf`: muestra solo los bloques que tienen esta frase. Se puede repetir; basta con que un bloque tenga una. |
+| `--excluir "frase"` | `-e` | Quita las líneas que tienen esta frase, aunque tengan una de conservar. Se puede repetir. |
+| `--linea-inicial "fragmento"` | `-li` | Línea donde empieza cada bloque. Va siempre con `-lf`. |
+| `--linea-final "fragmento"` | `-lf` | Línea donde termina cada bloque. Va siempre con `-li`. |
+| `--delete` | | Borra todos los outputs de este script en `<carpeta actual>/<usuario>/`. Pide confirmación. No toca los logs originales ni el `.config`. |
+| `--help` | `-h` | Ayuda con un ejemplo completo. |
 
 Se puede pasar más de un log; cada uno tiene su propio menú y su propio archivo de salida.
 
 ## Nombre del archivo de salida
 
 ```
-<log>__<fechas>__<filtros>__<generado>.log
-process_bids_AMCUS_2129__20260908__c-could-not-read-help_e-etab__20261121-171900.log
+<n>_<log>_filtrado_<fechas>.log
+1_process_bids_AMCUS_2129_filtrado_20260908_a_20261019.log
+2_process_bids_AMCUS_2129_filtrado_20260908.log
 ```
 
-|Parte|Qué es|
-|---|---|
-|`<log>`|Nombre del log, sin extensión.|
-|`<fechas>`|Un día (`20260908`) o del primero al último elegido (`20261019-20261021`).|
-|`<filtros>`|`c-`, `e-`, `li-`, `lf-`, `bc-` con las primeras 20 letras de cada frase (minúsculas, sin acentos, espacios y símbolos como `-`). Sin frases: `default`.|
-|`<generado>`|Fecha y hora en que se corrió el script. Cada corrida crea un archivo nuevo; nunca se sobreescribe uno anterior.|
+- `<fechas>`: un día (`20260908`) o del primero al último elegido (`20260908_a_20261019`).
+- Si ya hay un output del mismo log con las mismas fechas, se sobreescribe y conserva su número.
+- Si las fechas cambian, el output lleva el siguiente número de la carpeta.
+- Las frases usadas quedan en el encabezado del archivo (`Conservar`, `Excluir` y `Comando:`), no en el nombre.
 
-- Las partes van separadas por doble guion bajo (`__`), porque los nombres de log ya traen `_`.
-- `ls` los ordena por log, luego por fecha del log y luego por hora de generación.
-- Para buscar: `ls <usuario>/*__20261019__*` (un día) o `ls <usuario>/*c-cannot-create-gt*` (una frase).
-- El nombre recorta las frases; el comando completo va en la línea `Comando:` del encabezado.
-- Si dos corridas caen en el mismo segundo, la segunda termina en `b.log`.
+## Borrar los outputs (--delete)
+
+```
+python filtrar_log.py --delete
+```
+
+- Lista los outputs que va a borrar y pide confirmación: hay que escribir `s`. Cualquier otra respuesta no borra nada.
+- Solo borra, dentro de `<carpeta actual>/<usuario>/`, archivos con nombre de output (`..._filtrado_AAAAMMDD.log` o `..._filtrado_AAAAMMDD_a_AAAAMMDD.log`, con o sin número) y los temporales `.tmp` que deja una corrida interrumpida. Después de borrar, la numeración vuelve a empezar en 1.
+- Nunca borra los logs originales, el `filtrar_log.config`, otros archivos de la carpeta ni enlaces simbólicos.
+- Sin terminal (por ejemplo, en cron) no borra nada; solo lista lo que habría borrado.
+- Se usa solo: si además pones un log o frases, se ignoran.
 
 ## Reglas del filtro
 
@@ -70,9 +76,9 @@ process_bids_AMCUS_2129__20260908__c-could-not-read-help_e-etab__20261121-171900
 3. **Frases default del `.config`.** Después salen las líneas con una frase de `[conservar]`, sin las que tengan una frase de `[excluir]` o de `-e`. Las que ya salieron con `-c` no se repiten.
 4. Cada línea va tal cual del log, seguida de `linea N` (su número en el log original).
 5. **Frases.**
-    - No distinguen mayúsculas.
-    - Con el prefijo `re:` son una expresión regular, por ejemplo `re:LIMO\+$`.
-    - Una expresión regular inválida se avisa y se omite.
+   - No distinguen mayúsculas.
+   - Con el prefijo `re:` son una expresión regular, por ejemplo `re:LIMO\+$`.
+   - Una expresión regular inválida se avisa y se omite.
 
 ## Ejemplo completo
 
@@ -80,7 +86,7 @@ process_bids_AMCUS_2129__20260908__c-could-not-read-help_e-etab__20261121-171900
 python filtrar_log.py process_bids.log -f 2026-10-19 -f 2026-10-20 -c "Cannot create gt" -c "re:LIMO\+$" -e "Setting baseURL"
 ```
 
-Escribe `<usuario>/process_bids__20261019-20261020__c-cannot-create-gt_c-re-limo_e-setting-baseurl__20261121-171900.log`:
+Escribe `<usuario>/1_process_bids_filtrado_20261019_a_20261020.log`:
 
 ```
 LOG ["process_bids.log"] FILTRADO
