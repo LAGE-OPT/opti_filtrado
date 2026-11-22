@@ -71,7 +71,7 @@ Elige fechas (ejemplo: 1,3 o 2-4; T = todas; Enter = ultimas 3):
     - Con el prefijo `re:` son una expresión regular (se busca con el módulo `re` de Python).
     - Una expresión regular inválida se avisa y se omite.
 
-## Ejemplo completo
+## Ejemplo -c y -e
 
 ```
 python filtrar_log.py process_bids.log -f 2026-10-19 -f 2026-10-20 -c "Cannot create gt" -c "LIMO+" -e "Setting baseURL"
@@ -104,21 +104,13 @@ Error! Pid:1601606  Mon Oct 19 14:04:00 2026  User:amxcrewbidsvc linea 2149
 ...
 ```
 
-El contador solo incluye las frases que se pasan con `-c` y `-e`. Las frases del `.config` se aplican, pero no se cuentan.
-
-Debajo del contador de cada frase de `-c` van sus líneas, tal cual del log, cada una seguida de `linea N`. Esas líneas no se repiten en la sección del `.config`. Las de `-e` solo llevan el contador. Si `-e` quita líneas de una frase de `-c`, el contador lo dice al final: `(N quitadas por -e)`.
-
-Después de la última raya va `Frases default de filtrar_log.config: N lineas` y esas líneas, con el mismo formato. Sin `-c` es la única sección.
-
 ## Bloques entre dos líneas (-li y -lf)
 
-Con `-li` y `-lf`, el script agrega bloques completos: desde una línea que tenga el fragmento inicial hasta la siguiente que tenga el fragmento final, incluidas las dos. Los bloques van primero y después el resultado del filtro de conservar y excluir, como siempre.
+Con `-li` y `-lf`, el script agrega bloques completos: desde una línea que tenga el fragmento inicial hasta la siguiente que tenga el fragmento final, incluidas las dos.
 
 ```
 python filtrar_log.py -c "could not read help topic file:" -li "Studio PID:" -lf "Release:" -bc "Display:   :1" -c "amxcrewbidsvc" process_bids_AMCUS_2129.log
 ```
-
-Sin `-f` sale el menú de fechas. Con Enter (últimas 3 fechas: 2026-10-05, 2026-10-06 y 2026-10-19) escribe:
 
 ```
 Bloques desde "Studio PID:" hasta "Release:" con [Display:   :1]: 15 de 16 encontrados
@@ -144,18 +136,6 @@ could not read help topic file:: Encontrado 16 veces de la linea 1429525 a la li
 amxcrewbidsvc: Encontrado 48 veces de la linea 1429510 a la linea 1482923
 ...
 ```
-
-El bloque 1 (línea 1429508) no se muestra porque su display es `:2`, no `:1`; por eso la lista empieza en el bloque 2.
-
-Después de los bloques siguen las frases, sus contadores y el log filtrado por conservar y excluir, igual que sin `-li` y `-lf`. Todas las líneas del log van tal cual el original.
-
-- `-li` y `-lf` pueden ser un fragmento de la línea. Siguen las reglas de las frases: no distinguen mayúsculas y aceptan `re:`.
-- El bloque solo se corta al encontrar la línea final. Si la línea inicial se repite en medio, sigue siendo el mismo bloque.
-- La línea final se busca a partir de la línea siguiente a la inicial. Una línea final suelta, fuera de un bloque, se ignora.
-- Un bloque empieza solo en las fechas elegidas, pero sigue hasta su línea final aunque pase a otro día.
-- Si el log termina sin la línea final, ese último bloque no se muestra. El encabezado avisa en qué línea empezaba.
-- Con `-li "Running script with settings"` y `-lf "CuiExit"`, una corrida colgada (sin `CuiExit`) queda en el mismo bloque que la corrida siguiente, hasta el `CuiExit` de esa.
-
 ### Solo los bloques que tienen una frase (-bc)
 
 ```
@@ -172,7 +152,7 @@ Bloques desde "Error! Pid" hasta "Legend:" con [MTY4044OD]: 10 de 10 encontrados
 - `-bc` se puede repetir: basta con que el bloque tenga una de las frases. Sigue las reglas de las frases (sin distinguir mayúsculas, `re:`).
 - Cada bloque conserva su número original. El encabezado dice cuántos se muestran de cuántos hay.
 - `-bc` no cambia el log filtrado por conservar y excluir, que sigue debajo de los bloques.
-- Usar `-bc` sin `-li` y `-lf` es un error.
+- No se puede usar `-bc` sin `-li` y `-lf`.
 
 ## El archivo de configuración
 
@@ -185,14 +165,4 @@ Se edita a mano: una frase por línea, y las líneas que empiezan con `#` se ign
 
 Si borras el archivo, se vuelve a crear con las frases default. Las frases que hayas agregado se pierden.
 
-Cada usuario tiene su propia carpeta y su propio `.config`. Así, varios ingenieros pueden usar el script en el mismo servidor sin pisarse.
-
-## Cuando no hay terminal
-
-En cron, o con la entrada redirigida, el menú no aparece y se toman las últimas 3 fechas del log. Ctrl-C cancela sin mostrar errores.
-
-## Limitaciones
-
-- No lee `.gz` ni `.zip`: hay que descomprimirlos antes.
-- Las horas con formato `2026-10-19 20:00:20` están en UTC (6 horas adelante de México). No se usan para fechar corridas. En un log sin corridas, una línea de la noche puede quedar en el día siguiente.
-- Si una frase de conservar coincide con casi todo el log, el log filtrado sale casi del mismo tamaño que el original.
+Cada usuario tiene su propia carpeta y su propio `.config`. Así, varios ingenieros pueden usar el script en el mismo servidor sin problema
