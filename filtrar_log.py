@@ -30,28 +30,10 @@ RAYA = '-' * 89
 NUMERADO = re.compile(r'^\d+_.+_filtrado_\d{8}(_a_\d{8})?\.log$') # Outputs con numero: 1_process_bids_filtrado_20261019.log
 MARCA_BLOQUE = b'\x00\x00@@BLOQUE@@%d\x00\x00\n' # Lugar del titulo de cada bloque mientras no se sabe donde termina
 
-'''FRASES DEFAULT: SE ESCRIBEN EN EL .config LA PRIMERA VEZ; DESPUES SE EDITAN AHI'''
 CONFIG_INICIAL = u'''# OPTI FILTRADO - frases default de filtrar_log.py. Una por linea; las que empiezan con # se ignoran.
 # Sin distinguir mayusculas. Con el prefijo re: es expresion regular.
-#
-# COMO SE USAN
-# El archivo de salida tiene dos partes; cada linea va tal cual del log, seguida de su numero: <linea del log> linea N
-# 1. Frases de -c (terminal): debajo del contador de cada frase, sus lineas, sin las que tengan una frase de -e.
-#    Una frase de -c gana a [excluir] de este archivo; solo -e la quita.
-# 2. Frases default (este archivo): las lineas con una frase de [conservar], sin las que tengan una frase de
-#    [excluir] o de -e. Las lineas que ya salieron en la parte 1 no se repiten.
-# Una linea sin ninguna frase de -c ni de [conservar] no aparece.
-#
-# EJEMPLO COMPLETO
-# python filtrar_log.py -f 2026-09-08 -c "could not read help topic file:" -e "etab" process_bids_AMCUS_2129.log
-# con estas lineas en el log:
-#     read_help_topics: could not read help topic file: .../topics.list -> parte 1 (tiene la frase de -c; read_help_topics
-#                                                                          esta en [excluir], pero -c gana)
-#     could not read help topic file: .../x.etab                        -> se quita (tiene la frase de -c, pero tambien etab de -e)
-#     Error! Pid:1601606 ...                                            -> parte 2 (Error! esta en [conservar])
-#     Error! GetTaskCol: Could not to find task column                  -> se quita (GetTaskCol esta en [excluir])
-#     CuiExit: shutdown complete.                                       -> se quita (no tiene frase de -c ni de [conservar])
-# Para dejar de ver algo siempre, borra su linea de [conservar] o ponle # adelante.
+#Añade abajo de [conservar] las frases o palabras a buscar
+#[excluir] Ignora las líneas encontradas con [conservar] que se quieran descartar
 
 [conservar]
 Error!
@@ -408,59 +390,14 @@ if __name__ == '__main__':
   python filtrar_log.py process_bids.log --fecha 2026-10-19 --fecha 2026-10-20 \\
       --conservar "Cannot create gt" --conservar "LIMO+" --excluir "Setting baseURL"
 
-  - Toma solo las corridas que empezaron el 19 y el 20 de octubre (sin --fecha: menu para elegirlas).
-  - Primero, bajo su contador, las lineas con "Cannot create gt" o con "LIMO+" (-c),
-    sin las que tambien tienen "Setting baseURL" (-e). Sin -e salen todas.
-  - Despues, las lineas de [conservar] del .config, sin las de [excluir] ni las de -e (sin repetir las de -c).
-  - Cada linea va tal cual del log, seguida de: linea N
-  - Escribe usuarios/<usuario>/1_process_bids_filtrado_20261019_a_20261020.log con este encabezado
-    (mismo log y mismas fechas: se sobreescribe; fechas distintas: siguiente numero):
+Frases:
+    -Sin distinguir mayusculas
+    -Con el prefijo re: son expresion regular
+Las líneas:
+    -Solo se muestran las lineas con una frase de -c o de [conservar],
+    -Si tambien tienen una de excluir, se quitan.
+    -Una frase de -c gana a [excluir] del .config
 
-      LOG ["process_bids.log"] FILTRADO
-      Generado por: usuario el 2026-11-21 17:19:00
-      Comando: python filtrar_log.py process_bids.log --fecha 2026-10-19 ...
-      Fechas: 2026-10-19, 2026-10-20
-      -------------------------------------------------------------------------
-      Conservar [Cannot create gt, LIMO+]
-      Excluir [Setting baseURL]
-      Las frases default de conservar y excluir se encuentran en filtrar_log.config
-      -------------------------------------------------------------------------
-      Cannot create gt: Encontrado 452 veces de la linea 1350 a la linea 74419
-      (cada linea con "Cannot create gt", tal cual del log, seguida de: linea N)
-
-      LIMO+: Encontrado 452 veces de la linea 1350 a la linea 74419
-      (cada linea con "LIMO+", seguida de: linea N)
-
-      Setting baseURL: Encontrado 474 veces de la linea 647 a la linea 75430
-      -------------------------------------------------------------------------
-      Frases default de filtrar_log.config: 102 lineas
-      Error! Pid:1601606  Mon Oct 19 14:04:00 2026  User:amxcrewbidsvc linea 2149
-      ...
-
-bloques entre dos lineas (-li y -lf, siempre juntas; pueden ser solo un fragmento de la linea):
-  python filtrar_log.py process_bids.log -f 2026-10-19 -li "LEG AM" -lf "LEG LA"
-
-  - Escribe primero cada bloque completo, desde una linea con el fragmento inicial hasta la siguiente con el
-    fragmento final (las dos incluidas), y despues el log filtrado por conservar y excluir, como siempre.
-  - El bloque solo se corta al encontrar la linea final: si la linea inicial se repite en medio, sigue el mismo bloque.
-  - Cada bloque lleva un titulo con sus lineas: ----- Bloque 1: de la linea 99 a la linea 376 (278 lineas) -----
-  - Si el log termina sin la linea final, ese ultimo bloque no se muestra; el encabezado avisa donde empezaba.
-  - Con -bc "frase" solo se muestran los bloques que tienen esa frase en alguna de sus lineas (se puede repetir;
-    basta una). Ejemplo, solo los errores del vuelo duplicado MTY4044:
-      python filtrar_log.py process_bids.log -li "Error! Pid" -lf "Legend:" -bc "MTY4044OD"
-
-borrar outputs:
-  python filtrar_log.py --delete
-  - Borra los outputs de este script en usuarios/<usuario>/ despues de pedir confirmacion (s).
-  - No toca los logs originales ni filtrar_log.config. Sin terminal no borra nada.
-
-forma corta: -f es --fecha, -c es --conservar, -e es --excluir. El mismo ejemplo:
-  python filtrar_log.py process_bids.log -f 2026-10-19 -f 2026-10-20 -c "Cannot create gt" -c "LIMO+" -e "Setting baseURL"
-
-frases: sin distinguir mayusculas; con el prefijo re: son expresion regular.
-Solo se muestran las lineas con una frase de -c o de [conservar]; si tambien tienen una de excluir, se quitan.
-Una frase de -c gana a [excluir] del .config; solo -e la quita. Si -e quita lineas de una frase de -c,
-el contador lo dice: (N quitadas por -e).
 Las frases default estan en usuarios/<usuario>/filtrar_log.config; se crea la primera vez.''')
     parser.add_argument('logs', nargs='*', help='uno o mas logs')
     parser.add_argument('--delete', action='store_true',
