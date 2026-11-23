@@ -67,14 +67,13 @@ carmusr.crew_modules.request
 '''
 
 '''PATRONES DE FECHA. SOLO IMPORTA EL DIA: LA HORA SE IGNORA
-OJO: EL FORMATO 2026-10-19 20:00:20 ESTA EN UTC (6 HORAS ADELANTE); POR ESO NO SE USA PARA LA FECHA DE UNA CORRIDA'''
-FECHA_ISO = re.compile(br'(\d{4})-(\d\d)-(\d\d) \d\d:\d\d')                                 # 2026-10-19 20:00:20
+OJO: EL FORMATO 2026-10-19 20:00:20 NO SE USA: ESTA EN UTC (6 HORAS ADELANTE) Y MOVERIA LAS CORRIDAS NOCTURNAS AL DIA SIGUIENTE'''
 FECHA_JUNTA = re.compile(br'(20\d\d)(\d\d)(\d\d)[ _]\d\d')                                  # 20261019 14:00:17 o 20261019_140011
 FECHA_TEXTO = re.compile(br'[A-Z][a-z]{2} ([A-Z][a-z]{2}) +(\d{1,2}) \d\d:\d\d:\d\d (\d{4})') # Mon Oct 19 14:00:11 2026
 
 
-def buscar_fecha(linea, con_utc=True):
-    m = (con_utc and FECHA_ISO.search(linea)) or FECHA_JUNTA.search(linea)
+def buscar_fecha(linea):
+    m = FECHA_JUNTA.search(linea)
     if m:
         anio, mes, dia = [int(g) for g in m.groups()]
     else:
@@ -96,7 +95,7 @@ def cambios_de_fecha(ruta):
             if linea.lstrip(b'\x00').startswith(INICIO):
                 inicio, en_corridas, buscar = num, True, True
             elif buscar:
-                fecha = buscar_fecha(linea, con_utc=not en_corridas)
+                fecha = buscar_fecha(linea)
                 if fecha:
                     if not cambios or cambios[-1][1] != fecha:
                         cambios.append((inicio if en_corridas else num, fecha))
@@ -278,7 +277,7 @@ LOS BLOQUES Y EL FILTRADO VAN A DOS ARCHIVOS TEMPORALES; AL FINAL SE JUNTAN: PRI
                 del_config += 1
     sin_final = bloques.pop() if dentro else None # El log termino antes de la linea final: ese bloque no se muestra
 
-    '''ENCABEZADO: DATOS DEL LOG; DESPUES DE LOS BLOQUES (SI SE PIDIERON) VAN LAS FRASES Y SUS CONTADORES'''
+    #        ENCABEZADO:
     inicio = [u'LOG ["%s"] FILTRADO' % nombre,
               u'Generado por: %s el %s' % (usuario, time.strftime('%Y-%m-%d %H:%M:%S', ahora)),
               u'Comando: %s' % comando,
@@ -300,8 +299,6 @@ LOS BLOQUES Y EL FILTRADO VAN A DOS ARCHIVOS TEMPORALES; AL FINAL SE JUNTAN: PRI
             texto += u' (%d quitadas por -e)' % quitadas
         return (texto + u'\n').encode('utf-8')
 
-    '''ARCHIVO FINAL: DATOS DEL LOG, BLOQUES (CADA UNO CON SU TITULO), FRASES CON SUS CONTADORES Y LOG FILTRADO
-    LAS LINEAS DEL LOG VAN TAL CUAL EL ORIGINAL'''
     with open(salida, 'wb') as archivo:
         archivo.write(u'\n'.join(inicio).encode('utf-8') + b'\n')
         if inicial:
@@ -359,27 +356,11 @@ OUTPUT = re.compile(r'_filtrado_\d{8}(_a_\d{8})?\.log(\.bloques\.tmp|\.frases\.t
 
 def borrar_salidas(carpeta):
     if not os.path.isdir(carpeta):
-        print('No hay outputs que borrar: no existe %s' % carpeta)
         return
-    archivos = sorted(a for a in os.listdir(carpeta) if OUTPUT.search(a) and os.path.isfile(os.path.join(carpeta, a))
-                      and not os.path.islink(os.path.join(carpeta, a)))
-    if not archivos:
-        print('No hay outputs que borrar en %s' % carpeta)
-        return
-    for archivo in archivos:
-        print('  ' + archivo)
-    if not sys.stdin.isatty():
-        print('Sin terminal no se borra nada: corre --delete desde una terminal para confirmar')
-        return
-    print('Se borraran %d outputs de %s (los logs originales y %s no se tocan). Escribe s para confirmar: '
-          % (len(archivos), carpeta, CONFIG), end='')
-    sys.stdout.flush()
-    if sys.stdin.readline().strip().lower() not in ('s', 'si', 'y', 'yes'):
-        print('No se borro nada.')
-        return
-    for archivo in archivos:
-        os.remove(os.path.join(carpeta, archivo))
-    print('%d outputs borrados.' % len(archivos))
+    for archivo in os.listdir(carpeta):
+        ruta = os.path.join(carpeta, archivo)
+        if OUTPUT.search(archivo) and os.path.isfile(ruta) and not os.path.islink(ruta):
+            os.remove(ruta)
 
 
 if __name__ == '__main__':
@@ -390,18 +371,11 @@ if __name__ == '__main__':
   python filtrar_log.py process_bids.log --fecha 2026-10-19 --fecha 2026-10-20 \\
       --conservar "Cannot create gt" --conservar "LIMO+" --excluir "Setting baseURL"
 
-Frases:
-    -Sin distinguir mayusculas
-    -Con el prefijo re: son expresion regular
-Las líneas:
-    -Solo se muestran las lineas con una frase de -c o de [conservar],
-    -Si tambien tienen una de excluir, se quitan.
-    -Una frase de -c gana a [excluir] del .config
-
+frases: sin distinguir mayusculas; con el prefijo re: son expresion regular.
 Las frases default estan en usuarios/<usuario>/filtrar_log.config; se crea la primera vez.''')
     parser.add_argument('logs', nargs='*', help='uno o mas logs')
     parser.add_argument('--delete', action='store_true',
-                        help='borra todos los outputs de este script en <carpeta actual>/usuarios/<usuario>/ (pide confirmacion); '
+                        help='borra sin preguntar todos los outputs de este script en <carpeta actual>/usuarios/<usuario>/; '
                              'no toca los logs originales ni el .config')
     parser.add_argument('-f', '--fecha', action='append', default=[], help='AAAA-MM-DD; se puede repetir. Sin -f sale un menu (Enter = ultimas 3; sin terminal, como en cron, toma las ultimas 3)')
     parser.add_argument('-c', '--conservar', action='append', default=[], help='frase de las lineas que se muestran; se puede repetir')
@@ -412,10 +386,7 @@ Las frases default estan en usuarios/<usuario>/filtrar_log.config; se crea la pr
     parser.add_argument('-e', '--excluir', action='append', default=[], help='quita las lineas que la tengan, aunque tengan una de conservar; se puede repetir')
     args = parser.parse_args()
     if args.delete:
-        try:
-            borrar_salidas(os.path.join(os.getcwd(), 'usuarios', getpass.getuser()))
-        except KeyboardInterrupt:
-            print('\nCancelado.')
+        borrar_salidas(os.path.join(os.getcwd(), 'usuarios', getpass.getuser()))
         sys.exit(0)
     if not args.logs:
         parser.error('indica uno o mas logs (o --delete para borrar los outputs)')
